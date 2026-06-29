@@ -1,0 +1,7 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local output files (optional, but we keep results/ and figures/ tracked as requested)
