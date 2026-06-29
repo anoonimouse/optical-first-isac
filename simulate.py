@@ -41,6 +41,9 @@ def run_frame_simulation(N, Delta_f, M_qam, kappa, SNR_comm_dB, SNR_sens_dB, tar
     return num_bits, comm_errors, range_error
 
 def main():
+    # Set seed for exact reproducibility of Monte Carlo trials
+    np.random.seed(42)
+    
     print("=" * 60)
     print("OPTICAL-FIRST ISAC: DCO-OFDM JOINT WAVEFORM SIMULATION")
     print("=" * 60)
@@ -61,18 +64,19 @@ def main():
     ber_results = {}
     rmse_results = {}
     
+    ber_se = {}
+    rmse_se = {}
+    
     for bias in bias_levels:
         results[bias] = {"ber": [], "rmse": []}
         ber_results[bias] = []
         rmse_results[bias] = []
+        ber_se[bias] = []
+        rmse_se[bias] = []
         
         print(f"\nRunning Monte Carlo simulation for DC bias level = {bias} sigma...")
         
         for snr in snr_range:
-            # We run two Monte Carlo simulation sets:
-            # 1. Vary communication SNR (keeping sensing SNR constant at 15 dB) to get BER
-            # 2. Vary sensing SNR (keeping communication SNR constant at 15 dB) to get Range RMSE
-            
             # --- Communication BER Sweep ---
             total_bits = 0
             total_errors = 0
@@ -85,6 +89,8 @@ def main():
                 total_bits += num_bits
                 total_errors += comm_errors
             ber = total_errors / total_bits
+            # Binomial standard error: SE = sqrt( p*(1-p) / N_bits )
+            se_ber = np.sqrt(ber * (1.0 - ber) / total_bits) if total_bits > 0 else 0.0
             
             # --- Sensing RMSE Sweep ---
             range_errors = []
@@ -97,23 +103,38 @@ def main():
                 # Outlier rejection (threshold 5m from target)
                 if np.abs(range_error) < 5.0:
                     range_errors.append(range_error)
+            
+            range_errors = np.array(range_errors)
             range_rmse = rmse(range_errors)
+            
+            # Compute standard error of the RMSE using the Delta method
+            # SE_MSE = std(e_i^2) / sqrt(M)
+            # SE_RMSE = SE_MSE / (2 * RMSE)
+            if len(range_errors) > 0:
+                sq_errors = range_errors ** 2
+                se_mse = np.std(sq_errors) / np.sqrt(len(sq_errors))
+                se_rmse = se_mse / (2.0 * np.maximum(range_rmse, 1e-6))
+            else:
+                se_rmse = 0.0
             
             results[bias]["ber"].append(ber)
             results[bias]["rmse"].append(range_rmse)
             ber_results[bias].append(ber)
             rmse_results[bias].append(range_rmse)
             
-            print(f"  SNR: {snr:2d} dB | BER: {ber:.5f} | Range RMSE: {range_rmse:.4f} m")
+            ber_se[bias].append(se_ber)
+            rmse_se[bias].append(se_rmse)
+            
+            print(f"  SNR: {snr:2d} dB | BER: {ber:.5f} | Range RMSE: {range_rmse:.4f} m (SE: {se_rmse:.4f} m)")
 
     # Save results to output files
     export_results_csv(snr_range, ber_results, rmse_results, results_dir="results")
     export_results_json(snr_range, results, file_path="results/simulation_results.json")
     print("\nSimulation results successfully exported to 'results/ber.csv' and 'results/rmse.csv'.")
     
-    # Generate and save figures
-    plot_ber_vs_snr(snr_range, ber_results, output_path="figures/figure4a.png")
-    plot_rmse_vs_snr(snr_range, rmse_results, output_path="figures/figure4b.png")
+    # Generate and save figures with confidence intervals and on-plot annotations
+    plot_ber_vs_snr(snr_range, ber_results, ber_se, output_path="figures/figure4a.png")
+    plot_rmse_vs_snr(snr_range, rmse_results, rmse_se, output_path="figures/figure4b.png")
     print("Figures successfully saved to 'figures/figure4a.png' and 'figures/figure4b.png'.")
     print("=" * 60)
 
